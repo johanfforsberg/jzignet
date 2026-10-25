@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 
 pub fn build(b: *std.Build) void {
     const ally = b.allocator;
@@ -7,15 +8,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const no_nanbox = b.option(bool, "no_nanbox", "Do not use nanbox implementation of Janet (default false)") orelse false;
 
-    const c_header = b.addTranslateC(.{
-        .root_source_file = b.path("c/janet.h"),
-        .optimize = optimize,
-        .target = target,
+    // const c_header = b.addTranslateC(.{
+    //     .root_source_file = b.path("c/janet.h"),
+    //     .optimize = optimize,
+    //     .target = target,
+    // });
+    const translate_c = b.dependency("translate_c", .{});
+    const c_header: Translator = .init(
+        translate_c,
+        .{
+            .c_source_file = b.path("c/janet.h"),
+            .target = target,
+            .optimize = optimize,
     });
+
 
     const mod = b.addModule("jzignet", .{
         .root_source_file = b.path("src/janet.zig"),
-        .imports = &.{.{ .name = "cjanet", .module = c_header.createModule() }},
+        .imports = &.{.{ .name = "cjanet", .module = c_header.mod }},
         .optimize = optimize,
         .target = target,
         .link_libc = true,
@@ -29,7 +39,7 @@ pub fn build(b: *std.Build) void {
 
     var janet_flags: std.ArrayList([]const u8) = .empty;
     janet_flags.appendSlice(ally, &[_][]const u8{"-std=c99"}) catch unreachable;
-    if (optimize != .Debug) {
+    if (optimize != .debug) {
         janet_flags.appendSlice(ally, &[_][]const u8{ "-O2", "-flto" }) catch unreachable;
     }
     if (no_nanbox) {
@@ -39,17 +49,17 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addCSourceFile(.{ .file = b.path("c/janet.c"), .flags = janet_flags.items });
     b.installArtifact(lib);
 
-    const jzignet_module = b.addModule("jzignet", .{
+    const jzignet_module = std.Build.createModule(b, .{
         .root_source_file = b.path("src/janet.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     var tests = b.addTest(.{
-        .root_module = jzignet_module,
+        .root_module = jzignet_module
     });
 
-    tests.root_module.addImport("cjanet", c_header.createModule());
+    tests.root_module.addImport("cjanet", c_header.mod);
     tests.root_module.addImport("jzignet", mod);
     tests.root_module.linkLibrary(lib);
     const test_step = b.step("test", "Run library tests");
